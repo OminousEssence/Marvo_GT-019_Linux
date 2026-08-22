@@ -1,9 +1,8 @@
 import time
 import select
+import glob
+import os
 from evdev import UInput, ecodes, InputDevice, AbsInfo
-
-HIDRAW_NODE = "/dev/hidraw0"
-REAL_DEVICE_PATH = "/dev/input/event2"
 
 # Physical ShanWan Button -> Virtual Xbox 360 Button Map
 BUTTON_MAP = {
@@ -53,50 +52,88 @@ cap = {
     ecodes.EV_FF: [ecodes.FF_RUMBLE]
 }
 
-def send_hid_rumble(strong, weak):
+def find_hidraw_for_event(event_path):
+    # Locates matching /dev/hidraw node via sysfs hierarchy
+    event_name = os.path.basename(event_path)
+    base = f"/sys/class/input/{event_name}/device"
+    for depth in ["", "..", "../.."]:
+        matches = glob.glob(os.path.join(base, depth, "hidraw", "hidraw*"))
+        if matches:
+            return f"/dev/{os.path.basename(matches[0])}"
+    return None
+
+def find_controller_nodes():
+    # Scans /dev/input/event* for physical controller matching input capabilities
+    for dev_path in sorted(glob.glob("/dev/input/event*")):
+        try:
+            dev = InputDevice(dev_path)
+            # Skip virtual Xbox controller
+            if dev.info.vendor == 0x045e and dev.info.product == 0x028e:
+                continue
+
+            caps = dev.capabilities()
+            if ecodes.EV_ABS in caps and ecodes.EV_KEY in caps:
+                abs_codes = [c[0] if isinstance(c, tuple) else c for c in caps[ecodes.EV_ABS]]
+                key_codes = caps[ecodes.EV_KEY]
+                # Controller has ABS_X (axis 0) and physical Button 304 (A)
+                if 0 in abs_codes and 304 in key_codes:
+                    hidraw_node = find_hidraw_for_event(dev_path)
+                    return dev_path, hidraw_node
+        except Exception:
+            pass
+    return None, None
+
+def send_hid_rumble(hidraw_node, strong, weak):
+    if not hidraw_node:
+        return
     try:
-        with open(HIDRAW_NODE, "wb") as f:
+        with open(hidraw_node, "wb") as f:
             f.write(bytes([0x02, 0x08, strong, weak, 0xFF, 0x00, 0x00, 0x00]))
     except Exception:
         pass
 
-def stop_hid_rumble():
+def stop_hid_rumble(hidraw_node):
+    if not hidraw_node:
+        return
     try:
-        with open(HIDRAW_NODE, "wb") as f:
+        with open(hidraw_node, "wb") as f:
             f.write(bytes([0x02, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]))
     except Exception:
         pass
 
-# Create Virtual Device once at startup
-ui = UInput(cap, name="Microsoft X-Box 360 pad", vendor=0x045e, product=0x028e)
-print("Virtual Xbox 360 Gamepad Registered!")
+print("Starting Marvo Virtual Gamepad Daemon...")
 
-# Infinite Loop for Auto-Reconnect and Hotplugging
 while True:
     real_dev = None
-    
-    # 1. Wait for physical controller to be plugged in
-    while real_dev is None:
-        try:
-            real_dev = InputDevice(REAL_DEVICE_PATH)
-            print(f"Connected to physical controller at {REAL_DEVICE_PATH}!")
-        except (FileNotFoundError, OSError):
+    ui = None
+    event_path, hidraw_path = None, None
+
+    # 1. Dynamically discover controller nodes
+    while event_path is None:
+        event_path, hidraw_path = find_controller_nodes()
+        if event_path is None:
             time.sleep(5)
 
-    # 2. Grab physical device and run loop until disconnected
     try:
+        # 2. Grab physical controller first to isolate it from system
+        real_dev = InputDevice(event_path)
         real_dev.grab()
 
-        # Startup Haptic Pulse (0.2s at ~10% power)
-        send_hid_rumble(30, 30)
+        # 3. Create virtual Xbox 360 controller
+        ui = UInput(cap, name="Microsoft X-Box 360 pad", vendor=0x045e, product=0x028e)
+        print(f"Connected: {event_path} ({real_dev.name}) | Hidraw: {hidraw_path}")
+
+        # 4. Startup Haptic Pulse (0.2s at ~10% power)
+        send_hid_rumble(hidraw_path, 30, 30)
         time.sleep(0.20)
-        stop_hid_rumble()
+        stop_hid_rumble(hidraw_path)
 
         effects = {}
 
+        # 5. Main event translation loop
         while True:
             r, _, _ = select.select([real_dev.fd, ui.fd], [], [], 0.1)
-            
+
             if r:
                 if real_dev.fd in r:
                     for event in real_dev.read():
@@ -131,15 +168,21 @@ while True:
                         elif event.type == ecodes.EV_FF:
                             if event.value > 0:
                                 strong, weak = effects.get(event.code, (255, 255))
-                                send_hid_rumble(strong, weak)
+                                send_hid_rumble(hidraw_path, strong, weak)
                             else:
-                                stop_hid_rumble()
+                                stop_hid_rumble(hidraw_path)
 
-    except (OSError, FileNotFoundError):
-        print("Controller disconnected! Re-waiting for connection...")
+    except (OSError, FileNotFoundError, Exception) as e:
+        print(f"Controller disconnected or error ({e}). Cleaning up...")
     finally:
         if real_dev:
             try:
                 real_dev.ungrab()
             except Exception:
                 pass
+        if ui:
+            try:
+                ui.close()
+            except Exception:
+                pass
+        time.sleep(5)
