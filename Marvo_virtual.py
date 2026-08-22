@@ -5,9 +5,6 @@ from evdev import UInput, ecodes, InputDevice, AbsInfo
 HIDRAW_NODE = "/dev/hidraw0"
 REAL_DEVICE_PATH = "/dev/input/event2"
 
-print(f"Connecting to physical controller at {REAL_DEVICE_PATH}...")
-real_dev = InputDevice(REAL_DEVICE_PATH)
-
 # Physical ShanWan Button -> Virtual Xbox 360 Button Map
 BUTTON_MAP = {
     304: ecodes.BTN_A,       # A
@@ -60,8 +57,8 @@ def send_hid_rumble(strong, weak):
     try:
         with open(HIDRAW_NODE, "wb") as f:
             f.write(bytes([0x02, 0x08, strong, weak, 0xFF, 0x00, 0x00, 0x00]))
-    except Exception as e:
-        print(f"HID write error: {e}")
+    except Exception:
+        pass
 
 def stop_hid_rumble():
     try:
@@ -70,59 +67,79 @@ def stop_hid_rumble():
     except Exception:
         pass
 
-# Emulate Microsoft Xbox 360 Controller
+# Create Virtual Device once at startup
 ui = UInput(cap, name="Microsoft X-Box 360 pad", vendor=0x045e, product=0x028e)
 print("Virtual Xbox 360 Gamepad Registered!")
 
-# Startup Haptic Pulse (0.2s at ~10% power)
-send_hid_rumble(30, 30)
-time.sleep(0.20)
-stop_hid_rumble()
+# Infinite Loop for Auto-Reconnect and Hotplugging
+while True:
+    real_dev = None
+    
+    # 1. Wait for physical controller to be plugged in
+    while real_dev is None:
+        try:
+            real_dev = InputDevice(REAL_DEVICE_PATH)
+            print(f"Connected to physical controller at {REAL_DEVICE_PATH}!")
+        except (FileNotFoundError, OSError):
+            time.sleep(5)
 
-real_dev.grab()
-effects = {}
+    # 2. Grab physical device and run loop until disconnected
+    try:
+        real_dev.grab()
 
-try:
-    while True:
-        r, _, _ = select.select([real_dev.fd, ui.fd], [], [], 0.1)
-        
-        if r:
-            if real_dev.fd in r:
-                for event in real_dev.read():
-                    if event.type == ecodes.EV_KEY:
-                        if event.code in BUTTON_MAP:
-                            ui.write(ecodes.EV_KEY, BUTTON_MAP[event.code], event.value)
-                            ui.syn()
-                    elif event.type == ecodes.EV_ABS:
-                        if event.code in AXIS_MAP:
-                            ui.write(ecodes.EV_ABS, AXIS_MAP[event.code], event.value)
-                            ui.syn()
+        # Startup Haptic Pulse (0.2s at ~10% power)
+        send_hid_rumble(30, 30)
+        time.sleep(0.20)
+        stop_hid_rumble()
 
-            if ui.fd in r:
-                for event in ui.read():
-                    if event.type == ecodes.EV_UINPUT:
-                        if event.code == ecodes.UI_FF_UPLOAD:
-                            upload = ui.begin_upload(event.value)
-                            effect = upload.effect
-                            if effect.type == ecodes.FF_RUMBLE:
-                                strong = effect.u.ff_rumble_effect.strong_magnitude >> 8
-                                weak = effect.u.ff_rumble_effect.weak_magnitude >> 8
-                                effects[effect.id] = (strong, weak)
-                            upload.retval = 0
-                            ui.end_upload(upload)
-                        elif event.code == ecodes.UI_FF_ERASE:
-                            erase = ui.begin_erase(event.value)
-                            if erase.effect_id in effects:
-                                del effects[erase.effect_id]
-                            erase.retval = 0
-                            ui.end_erase(erase)
+        effects = {}
 
-                    elif event.type == ecodes.EV_FF:
-                        if event.value > 0:
-                            strong, weak = effects.get(event.code, (255, 255))
-                            send_hid_rumble(strong, weak)
-                        else:
-                            stop_hid_rumble()
-finally:
-    real_dev.ungrab()
-    ui.close()
+        while True:
+            r, _, _ = select.select([real_dev.fd, ui.fd], [], [], 0.1)
+            
+            if r:
+                if real_dev.fd in r:
+                    for event in real_dev.read():
+                        if event.type == ecodes.EV_KEY:
+                            if event.code in BUTTON_MAP:
+                                ui.write(ecodes.EV_KEY, BUTTON_MAP[event.code], event.value)
+                                ui.syn()
+                        elif event.type == ecodes.EV_ABS:
+                            if event.code in AXIS_MAP:
+                                ui.write(ecodes.EV_ABS, AXIS_MAP[event.code], event.value)
+                                ui.syn()
+
+                if ui.fd in r:
+                    for event in ui.read():
+                        if event.type == ecodes.EV_UINPUT:
+                            if event.code == ecodes.UI_FF_UPLOAD:
+                                upload = ui.begin_upload(event.value)
+                                effect = upload.effect
+                                if effect.type == ecodes.FF_RUMBLE:
+                                    strong = effect.u.ff_rumble_effect.strong_magnitude >> 8
+                                    weak = effect.u.ff_rumble_effect.weak_magnitude >> 8
+                                    effects[effect.id] = (strong, weak)
+                                upload.retval = 0
+                                ui.end_upload(upload)
+                            elif event.code == ecodes.UI_FF_ERASE:
+                                erase = ui.begin_erase(event.value)
+                                if erase.effect_id in effects:
+                                    del effects[erase.effect_id]
+                                erase.retval = 0
+                                ui.end_erase(erase)
+
+                        elif event.type == ecodes.EV_FF:
+                            if event.value > 0:
+                                strong, weak = effects.get(event.code, (255, 255))
+                                send_hid_rumble(strong, weak)
+                            else:
+                                stop_hid_rumble()
+
+    except (OSError, FileNotFoundError):
+        print("Controller disconnected! Re-waiting for connection...")
+    finally:
+        if real_dev:
+            try:
+                real_dev.ungrab()
+            except Exception:
+                pass
