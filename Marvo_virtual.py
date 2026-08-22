@@ -18,24 +18,24 @@ BUTTON_MAP = {
     311: ecodes.BTN_TR,      # RB (Right Shoulder)
     314: ecodes.BTN_SELECT,  # Back / Select
     315: ecodes.BTN_START,   # Start
-    316: ecodes.BTN_MODE,    # Xbox / Home
+    316: ecodes.BTN_MODE,    # Home / Guide
     317: ecodes.BTN_THUMBL,  # L3 (Left Stick Click)
     318: ecodes.BTN_THUMBR,  # R3 (Right Stick Click)
 }
 
 # Physical ShanWan Raw Axis -> Virtual Xbox 360 Axis Map
 AXIS_MAP = {
-    0:  ecodes.ABS_X,        # Physical Left Stick X  -> Virtual ABS_X (Axis 0)
-    1:  ecodes.ABS_Y,        # Physical Left Stick Y  -> Virtual ABS_Y (Axis 1)
-    2:  ecodes.ABS_RX,       # Physical Right Stick X -> Virtual ABS_RX (Axis 3)
-    5:  ecodes.ABS_RY,       # Physical Right Stick Y -> Virtual ABS_RY (Axis 4)
-    10: ecodes.ABS_Z,        # Physical Left Trigger  -> Virtual ABS_Z (Axis 2 / LT)
-    9:  ecodes.ABS_RZ,       # Physical Right Trigger -> Virtual ABS_RZ (Axis 5 / RT)
+    0:  ecodes.ABS_X,        # Physical Left Stick X
+    1:  ecodes.ABS_Y,        # Physical Left Stick Y
+    2:  ecodes.ABS_RX,       # Physical Right Stick X
+    5:  ecodes.ABS_RY,       # Physical Right Stick Y
+    10: ecodes.ABS_Z,        # Physical Left Trigger (LT)
+    9:  ecodes.ABS_RZ,       # Physical Right Trigger (RT)
     16: ecodes.ABS_HAT0X,    # Physical D-Pad X
     17: ecodes.ABS_HAT0Y,    # Physical D-Pad Y
 }
 
-# Virtual Gamepad Capabilities (Standard Xbox 360 Layout)
+# Virtual Gamepad Capabilities
 cap = {
     ecodes.EV_KEY: [
         ecodes.BTN_A, ecodes.BTN_B, ecodes.BTN_X, ecodes.BTN_Y,
@@ -48,10 +48,10 @@ cap = {
         (ecodes.ABS_Y, AbsInfo(value=128, min=0, max=255, fuzz=0, flat=15, resolution=0)),
         (ecodes.ABS_RX, AbsInfo(value=128, min=0, max=255, fuzz=0, flat=15, resolution=0)),
         (ecodes.ABS_RY, AbsInfo(value=128, min=0, max=255, fuzz=0, flat=15, resolution=0)),
-        (ecodes.ABS_Z, AbsInfo(value=0, min=0, max=255, fuzz=0, flat=0, resolution=0)),     # LT
-        (ecodes.ABS_RZ, AbsInfo(value=0, min=0, max=255, fuzz=0, flat=0, resolution=0)),    # RT
-        (ecodes.ABS_HAT0X, AbsInfo(value=0, min=-1, max=1, fuzz=0, flat=0, resolution=0)),  # D-Pad X
-        (ecodes.ABS_HAT0Y, AbsInfo(value=0, min=-1, max=1, fuzz=0, flat=0, resolution=0)),  # D-Pad Y
+        (ecodes.ABS_Z, AbsInfo(value=0, min=0, max=255, fuzz=0, flat=0, resolution=0)),
+        (ecodes.ABS_RZ, AbsInfo(value=0, min=0, max=255, fuzz=0, flat=0, resolution=0)),
+        (ecodes.ABS_HAT0X, AbsInfo(value=0, min=-1, max=1, fuzz=0, flat=0, resolution=0)),
+        (ecodes.ABS_HAT0Y, AbsInfo(value=0, min=-1, max=1, fuzz=0, flat=0, resolution=0)),
     ],
     ecodes.EV_FF: [ecodes.FF_RUMBLE]
 }
@@ -70,9 +70,14 @@ def stop_hid_rumble():
     except Exception:
         pass
 
-# Emulate Microsoft Xbox 360 Wired Controller (0x045e:0x028e)
+# Emulate Microsoft Xbox 360 Controller
 ui = UInput(cap, name="Microsoft X-Box 360 pad", vendor=0x045e, product=0x028e)
 print("Virtual Xbox 360 Gamepad Registered!")
+
+# Startup Haptic Pulse (0.25s at ~35% power)
+send_hid_rumble(90, 90)
+time.sleep(0.25)
+stop_hid_rumble()
 
 real_dev.grab()
 effects = {}
