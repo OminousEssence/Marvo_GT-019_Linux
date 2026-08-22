@@ -74,9 +74,9 @@ def stop_hid_rumble():
 ui = UInput(cap, name="Microsoft X-Box 360 pad", vendor=0x045e, product=0x028e)
 print("Virtual Xbox 360 Gamepad Registered!")
 
-# Startup Haptic Pulse (0.25s at ~35% power)
-send_hid_rumble(90, 90)
-time.sleep(0.25)
+# Startup Haptic Pulse (0.2s at ~10% power)
+send_hid_rumble(30, 30)
+time.sleep(0.20)
 stop_hid_rumble()
 
 real_dev.grab()
