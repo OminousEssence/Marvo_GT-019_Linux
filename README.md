@@ -7,7 +7,7 @@
 
 
 
-# Systemd service
+# (Automatic startup) Systemd service
 Run
 `sudo nano /etc/systemd/system/Marvo_virtual.service`
 
