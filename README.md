@@ -14,7 +14,7 @@ Run
 Then add this
 ```
 [Unit]
-Description=Marvo Virtual Gamepad Rumble Bridge
+Description=Marvo Virtual Gamepad Daemon
 After=multi-user.target
 
 [Service]
