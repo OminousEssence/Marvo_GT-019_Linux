@@ -2,7 +2,37 @@ import time
 import select
 import glob
 import os
+import signal
+import sys
 from evdev import UInput, ecodes, InputDevice, AbsInfo
+
+# Global device references for signal handling cleanup
+running = True
+real_dev = None
+ui = None
+hidraw_path = None
+
+def handle_shutdown(sig, frame):
+    global running, real_dev, ui, hidraw_path
+    running = False
+    print("\nShutdown signal received. Cleaning up...")
+    if hidraw_path:
+        stop_hid_rumble(hidraw_path)
+    if real_dev:
+        try:
+            real_dev.ungrab()
+        except Exception:
+            pass
+    if ui:
+        try:
+            ui.close()
+        except Exception:
+            pass
+    sys.exit(0)
+
+# Intercept systemd stop (SIGTERM) and Ctrl+C (SIGINT)
+signal.signal(signal.SIGTERM, handle_shutdown)
+signal.signal(signal.SIGINT, handle_shutdown)
 
 # Physical ShanWan Button -> Virtual Xbox 360 Button Map
 BUTTON_MAP = {
@@ -103,16 +133,19 @@ def stop_hid_rumble(hidraw_node):
 
 print("Starting Marvo Virtual Gamepad Daemon...")
 
-while True:
+while running:
     real_dev = None
     ui = None
     event_path, hidraw_path = None, None
 
     # 1. Dynamically discover controller nodes
-    while event_path is None:
+    while running and event_path is None:
         event_path, hidraw_path = find_controller_nodes()
         if event_path is None:
             time.sleep(5)
+
+    if not running:
+        break
 
     try:
         # 2. Grab physical controller first to isolate it from system
@@ -131,8 +164,13 @@ while True:
         effects = {}
 
         # 5. Main event translation loop
-        while True:
-            r, _, _ = select.select([real_dev.fd, ui.fd], [], [], 0.1)
+        while running:
+            try:
+                r, _, _ = select.select([real_dev.fd, ui.fd], [], [], 0.1)
+            except (select.error, OSError):
+                if not running:
+                    break
+                continue
 
             if r:
                 if real_dev.fd in r:
@@ -173,16 +211,22 @@ while True:
                                 stop_hid_rumble(hidraw_path)
 
     except (OSError, FileNotFoundError, Exception) as e:
-        print(f"Controller disconnected or error ({e}). Cleaning up...")
+        if running:
+            print(f"Controller disconnected or error ({e}). Cleaning up...")
     finally:
+        if hidraw_path:
+            stop_hid_rumble(hidraw_path)
         if real_dev:
             try:
                 real_dev.ungrab()
             except Exception:
                 pass
+            real_dev = None
         if ui:
             try:
                 ui.close()
             except Exception:
                 pass
-        time.sleep(5)
+            ui = None
+        if running:
+            time.sleep(5)
