@@ -59,3 +59,9 @@ Add this line at the bottom
 SDL_GAMECONTROLLER_IGNORE_DEVICES="0x20bc/0x5500"
 ```
 Save (Ctrl+O - Enter - Ctrl+X), then restart
+
+# Other info
+The script is made by AI (Gemini). If you have a problem with that, you may go away. Also, I won't abandon this as long as I have this controller.
+
+How it works - 
+Basically, it takes the inputs from the actual controller and sends them to the game through the virtual Xbox controller. and it takes the rumble outputs from the game and sends them to the controller.
