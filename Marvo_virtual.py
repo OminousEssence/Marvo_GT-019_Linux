@@ -118,7 +118,7 @@ def send_hid_rumble(hidraw_node, strong, weak):
         return
     try:
         with open(hidraw_node, "wb") as f:
-            f.write(bytes([0x02, 0x08, strong, weak, 0xFF, 0x00, 0x00, 0x00]))
+            f.write(bytes([0x02, 0x08, weak, strong, 0xFF, 0x00, 0x00, 0x00]))
     except Exception:
         pass
 
